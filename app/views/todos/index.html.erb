@@ -1,10 +1,19 @@
+<!--
+
+todoTemplate
+
+  This template is responsible for rendering the actual todo list.
+
+-->
 <script id="todoTemplate" type="text/x-jquery-tmpl">
   <ul>
     {{each todos}}
     <li style="opacity: {{if todo.saving}}0.5{{else}}1{{/if}}">
-      <b>${todo.name}</b>
       {{if todo.completed}}
+      <s><b>${todo.name}</b></s>
       completed <b>${prettyDate(todo.completed.toString())}</b>
+      {{else}}
+      <b>${todo.name}</b>
       {{/if}}
       <input type="checkbox" onclick="viewModel.toggleComplete(${todo.id})" {{if todo.completed}}checked="true"{{/if}}></input>
       <button onclick="viewModel.deleteTodo(${todo.id})">Delete</button>
@@ -13,6 +22,13 @@
   </ul>
 </script>
 
+<!--
+
+alertTemplate
+
+  This template renders an array of alert strings.
+
+-->
 <script id="alertTemplate" type="text/x-jquery-tmpl">
   <ul>
     {{each alerts}}
@@ -21,40 +37,113 @@
   </ul>
 </script>
 
+<!--
+
+Main script block
+
+-->
 <script>
 
+  /*
+
+  The viewModel variable represents the data for the view. In essence, the HTML
+  is the interface, the templates are how the data is to be displayed, and the
+  viewModel is the data that drives the UI.
+
+  messages is a simple hash so that we can get prettier versions of
+  viewModel.viewState.
+
+  prettyDate just gives us a short date from either the default JavaScript
+  Date.toString or the Ruby date string.
+
+  */
   var viewModel,
+      messages = {
+        'saving': 'Saving...',
+        'error': 'Oh noes!'
+      },
       prettyDate = function(date) {
         return Date.parse(date.indexOf('(') > -1 ? date.substring(0, date.indexOf('(')) : date).toString('MM/dd/yyyy');
       };
 
+  /*
+
+  When the document is ready, configure knockout and create the viewModel
+
+  */
   $(document).ready(function() {
-    ko.bindingHandlers.disabled = {
-        update: function(element, valueAccessor, allBindingsAccessor) {
-          var value = valueAccessor(), allBindings = allBindingsAccessor();
-          $(element).attr('disabled', value == true);
-        }
-    };
-    
+
+    /*
+
+    Custom binding handlers allow you to extend knockout beyond its default
+    binding handlers (http://knockoutjs.com/documentation/custom-bindings.html)
+
+    Knockout provides a "disable" default handler that does exactly this,
+    however this is just to demonstrate how you would execute a custom handler:
+
+      ko.bindingHandlers.disabled = {
+          update: function(element, valueAccessor, allBindingsAccessor) {
+            var value = valueAccessor(), allBindings = allBindingsAccessor();
+            $(element).attr('disabled', value == true);
+          }
+      };
+     
+    */
+
     viewModel = {
-      
+
+      /*
+
+      Knockout basically wraps objects and arrays in order to send events
+      when the object is changed. This is the core of the binding methodology.
+      You can manually subscribe to these notifications with the .subscribe()
+      and .dispose() methods on the observable.
+
+      You can manually wrap values as follows, or you can use the mapping
+      plugin (http://knockoutjs.com/documentation/plugins.mapping.html) which
+      automatically wraps objects in observables.
+
+      */
+
       todos: ko.observableArray(<%= @todos.to_json.html_safe %>),
       viewState: ko.observable(''),
       alerts: ko.observableArray([]),
 
+      /*
+
+      I think it is good practice to put methods for transforming the data in
+      the viewModel. The following methods modify the corresponding objects on
+      the viewModel so the bindings can update, as well as communicate with the
+      server to update the actual model.
+
+      This interaction could easily be even further abstracted, but that's
+      beyond the scope of this demo.
+
+      */
+
       createTodo: function(name) {
+
+        // Push a boiler plate todo object on the todos array. Note the saving
+        // property, which we can bind to.
         viewModel.todos.push({ 'todo': { 'name': name, 'saving': true }});
         viewModel.viewState('saving');
-        
+
+        // Using jquery.rest.js, we're making AJAX calls to the server to
+        // create the todo object. 
         $.create({
           url: '/todos',
           data: { 'todo': { 'name': name }},
+
+          // If it succeeds, we replace the boiler plate object with the
+          // object returned from the server (which includes it's ID)
           success: function(response) {
             viewModel.viewState('');
             viewModel.todos.pop();
             viewModel.todos.push(response);
             viewModel.alerts.push('Successfully created Todo item.');
           },
+
+          // If it fails, we remove the boilerplate object and inform the user.
           error: function(xhr, status, error) {
             viewModel.viewState('error');
             viewModel.todos.pop();
@@ -62,6 +151,13 @@
           }
         });
       },
+
+      /*
+
+      In this method, we attempt to delete the todo from the model, and if
+      successful, we splice it out of the viewModel.
+
+      */
 
       deleteTodo: function(id) {
         if(confirm('Are you sure you want to delete this todo?')) {
@@ -88,6 +184,13 @@
         }
       },
 
+      /*
+
+      To mark the todo item as complete, we either remove or add the
+      "completed" date, and send the object back to the server in an update.
+
+      */
+
       toggleComplete: function(id) {
         _.each(viewModel.todos(), function(e, i) {
           if (e.todo.id == id) {
@@ -105,12 +208,31 @@
             });
           }
         });
+
+        // It is important to note that we have to manually call applyBindings
+        // here, because the child properties in the todo object are not
+        // wrapped as observables. If we wanted to do this, we would use the
+        // mapping plugin or manually wrap them.
+
         ko.applyBindings(viewModel);
       }
     };
 
+    /*
+
+    Once everything is configured, we call applyBindings to initially bind
+    the viewModel to all applicable bindings.
+
+    */
+
     ko.applyBindings(viewModel);
 
+    /*
+
+    jQuery event bindings
+
+    */
+    
     $('#create-todo').click(function() {
       viewModel.createTodo($('#new-todo-name').val());
       $('#new-todo-name').val('');
@@ -118,17 +240,28 @@
     
   });
 </script>
-    
+
+
 <h1>Knockout Todos</h1>
 
-<!--<div>
-  <span data-bind='visible: saving'>Saving...</span>
-  <span data-bind='visible: !saving()'>...</span>
-</div>-->
+<!--
+
+The "data-bind" attribute is the key to let Knockout know that it needs to
+check for a corresponding binding handler and evaluate the binding.
+
+-->
+<div style="height: 25px;">
+  <span data-bind='text: messages[viewState()]'></span>
+</div>
 <div style="float: right" data-bind='template: "alertTemplate"'></div>
 <div data-bind='template: "todoTemplate"'></div>
-<input id="new-todo-name"><button id="create-todo" data-bind="disabled: viewState()=='saving'">Create</button>
+<input id="new-todo-name"><button id="create-todo" data-bind="disable: viewState()=='saving'">Create</button>
 
+<!--
+
+This is scaffolded Rails CRUD view code:
+
+-->
 
 <h1>HTML Todos</h1>
 
@@ -155,4 +288,5 @@
 <br />
 
 <%= link_to 'New Todo', new_todo_path %>
+
 
